@@ -1,0 +1,141 @@
+# NuriJangter Crawler Configuration
+
+# Target Website Configuration
+website:
+  base_url: "https://nuri.g2b.go.kr"
+  list_page_url: "https://nuri.g2b.go.kr/"
+  search_params:
+    # Add specific search parameters if needed
+    area: ""  # Area code
+    industry: ""  # Industry code
+    dateType: "1"  # 1: 입찰공고일, 2: 입찰마감일
+    fromDate: ""  # YYYYMMDD format, leave empty for default (today - 7 days)
+    toDate: ""  # YYYYMMDD format, leave empty for default (today)
+
+# Crawler Configuration
+crawler:
+  # Browser settings
+  browser:
+    headless: true
+    timeout: 30000  # milliseconds
+    viewport:
+      width: 1920
+      height: 1080
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+  # Wait strategies
+  wait:
+    navigation_timeout: 30000  # milliseconds
+    element_timeout: 10000  # milliseconds
+    after_load: 2000  # milliseconds to wait after page load
+    between_pages: 1000  # milliseconds between page navigations
+
+  # Retry configuration
+  retry:
+    max_attempts: 3
+    initial_delay: 1000  # milliseconds
+    backoff_factor: 2.0  # exponential backoff
+    max_delay: 10000  # milliseconds
+
+  # Pagination
+  pagination:
+    max_pages: 0  # 0 = all pages, or set a limit for testing
+    items_per_page: 10
+
+  # Rate limiting
+  rate_limit:
+    requests_per_minute: 30
+    concurrent_requests: 3
+
+# Storage Configuration
+storage:
+  output_dir: "data"
+  formats:
+    - json
+    - csv
+  json:
+    indent: 2
+    ensure_ascii: false
+    filename_pattern: "bid_notices_{timestamp}.json"
+  csv:
+    filename_pattern: "bid_notices_{timestamp}.csv"
+    encoding: "utf-8-sig"  # UTF-8 with BOM for Excel compatibility
+    delimiter: ","
+
+# Checkpoint Configuration
+checkpoint:
+  enabled: true
+  directory: "checkpoints"
+  filename: "crawler_checkpoint.json"
+  save_interval: 10  # Save checkpoint every N records
+
+# Deduplication Configuration
+deduplication:
+  enabled: true
+  key_fields:
+    - "bid_notice_number"
+    - "bid_notice_name"
+  storage_file: "checkpoints/seen_items.json"
+
+# Scheduler Configuration
+scheduler:
+  enabled: false  # Set to true to enable scheduled runs
+  mode: "cron"  # "interval" or "cron"
+  interval:
+    hours: 6  # (Ignored in cron mode)
+  cron:
+    # expression: "*/30 * * * *"  # 나중에 이거 쓰시면 됩니다 (30분마다)
+    expression: "*/10 * * * *"  # 현재 설정: 10분마다
+  timezone: "Asia/Seoul"
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "detailed"  # "simple" or "detailed"
+  outputs:
+    console: true
+    file: true
+  file:
+    directory: "logs"
+    filename: "crawler_{timestamp}.log"
+    max_bytes: 10485760  # 10MB
+    backup_count: 5
+    encoding: "utf-8"
+
+# Data Extraction Configuration
+extraction:
+  # Fields to extract from list page
+  list_fields:
+    - "bid_notice_number"
+    - "bid_notice_name"
+    - "announcement_agency"
+    - "bid_method"
+    - "announcement_date"
+    - "deadline_date"
+    - "detail_link"
+
+  # Fields to extract from detail page
+  detail_fields:
+    - "classification"
+    - "budget_amount"
+    - "estimated_price"
+    - "base_price"
+    - "pre_qualification"
+    - "guarantee_rate"
+    - "bid_bond"
+    - "contract_bond"
+    - "payment_terms"
+    - "delivery_location"
+    - "delivery_deadline"
+    - "contact_person"
+    - "phone_number"
+    - "email"
+    - "specifications"
+    - "qualification_requirements"
+    - "evaluation_criteria"
+    - "attached_files"
+
+  # Handle missing data
+  handle_missing:
+    strategy: "null"  # "null", "empty_string", or "skip"
+    log_missing: true

@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+
+# Data and outputs
+data/*.json
+data/*.csv
+!data/.gitkeep
+
+# Logs
+logs/*.log
+!logs/.gitkeep
+
+
+# Scripts (Debug & Utility)
+scripts/
+
+# Verification outputs
+data_verify/
+logs_verify/
+
+# Project Specific
+*.png
+*.log
+
+# Checkpoints
+checkpoints/*.json
+!checkpoints/.gitkeep
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Internal Documentation
+ARCHITECTURE.md
+IMPROVEMENTS.md
+PROBLEM_SOLVING_APPROACH.md
+QUICKSTART.md
+TECHNICAL_OVERVIEW.md

@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  crawler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nurijangter-crawler
+    volumes:
+      # Mount configuration files
+      - ./config:/app/config:ro
+
+      # Mount data directories for persistence
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./checkpoints:/app/checkpoints
+
+    environment:
+      # Environment variables (can be overridden)
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - HEADLESS=true
+
+    # Command to run (can be overridden)
+    command: python main.py --resume
+
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Scheduled crawler service
+  crawler-scheduled:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nurijangter-crawler-scheduled
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./checkpoints:/app/checkpoints
+
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - HEADLESS=true
+
+    command: python main.py --scheduled --resume
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # Only run one of crawler or crawler-scheduled
+    profiles:
+      - scheduled
+
+# Named volumes (optional, for better data management)
+volumes:
+  crawler-data:
+  crawler-logs:
+  crawler-checkpoints:
