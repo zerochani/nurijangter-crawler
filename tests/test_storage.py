@@ -91,7 +91,9 @@ class TestJSONStorage:
         storage = JSONStorage(temp_dir, config)
 
         result = storage.save([], 'empty.json')
-        assert result is None  # Should not create file for empty data
+        assert result.exists()
+        loaded = storage.load(result)
+        assert loaded == []
 
 
 class TestCSVStorage:

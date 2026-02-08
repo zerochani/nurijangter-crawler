@@ -45,6 +45,12 @@ python main.py --log-level DEBUG
 python main.py --scheduled
 ```
 
+**재시도 실행 (실패 항목 다시 처리)**
+```bash
+python main.py --retry-failed
+```
+> **참고**: 재시도 성공 시 `crawler_checkpoint.json`의 실패 목록에서 자동 제거되고, `seen_items.json`에 처리된 항목으로 추가됩니다.
+
 ### 3. 결과 확인
 
 ```bash
