@@ -170,6 +170,66 @@ class CrawlerEngine(BaseCrawler):
             self.checkpoint_manager.complete_crawl(success=False)
             raise
 
+    def retry_failed_items(self) -> None:
+        """
+        Retry processing items that failed in previous crawls.
+        Uses search functionality to find items by ID.
+        """
+        self.logger.info("Starting retry of failed items...")
+        
+        # Load checkpoint to get failed items
+        if not self.checkpoint_manager.load_checkpoint():
+            self.logger.warning("No checkpoint found. Cannot retry.")
+            return
+
+        failed_items = self.checkpoint_manager.get_failed_items()
+        if not failed_items:
+            self.logger.info("No failed items to retry.")
+            return
+
+        self.logger.info(f"Found {len(failed_items)} failed items to retry.")
+
+        # Start browser
+        with self.browser_manager as browser:
+            page = browser.get_page()
+            
+            # Navigate to list page
+            list_url = self.config.get('website', {}).get('list_page_url', '')
+            self._navigate_to_page(page, list_url)
+
+            # Process each failed item
+            retry_count = 0
+            success_count = 0
+            
+            for item in failed_items:
+                bid_no = item.get('item_id')
+                if not bid_no:
+                    continue
+                
+                retry_count += 1
+                self.logger.info(f"Retrying item {retry_count}/{len(failed_items)}: {bid_no}")
+                
+                try:
+                    # Search and process
+                    if self._search_and_process_item(page, bid_no):
+                        success_count += 1
+                        # Remove from failed items in checkpoint
+                        self.checkpoint_manager.remove_failed_item(bid_no)
+                        self.logger.info(f"Successfully retried and removed from failed list: {bid_no}")
+                        
+                        # Save deduplication state immediately to keep in sync
+                        self.dedup_manager.save()
+                    else:
+                        self.logger.warning(f"Failed to retry {bid_no}")
+                        
+                except Exception as e:
+                    self.logger.error(f"Error retrying {bid_no}: {e}")
+
+            self.logger.info(f"Retry completed. Success: {success_count}/{len(failed_items)}")
+            
+            # Save data
+            self._save_data()
+
     def _crawl_list_pages(self, page) -> None:
         """
         Crawl all list pages.
@@ -313,6 +373,106 @@ class CrawlerEngine(BaseCrawler):
                 str(e)
             )
             self.stats['errors'] += 1
+
+    def _search_and_process_item(self, page, bid_no: str) -> bool:
+        """
+        Search for a specific bid notice by number and process it.
+        
+        Args:
+            page: Playwright page object
+            bid_no: Bid notice number to search
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # 1. Reset/Clear Search
+            # Click '입찰공고목록' to reset state
+            self.logger.debug("Resetting to list view...")
+            self._handle_nurijangter_spa(page) # Re-run nav sequence to ensure clean state
+            
+            # 2. Enter Bid Number in Search Box
+            # Inputs: input using ids or labels
+            # '공고번호' input box
+            # ID found from inspection: mf_wfm_container_sub_search_bidPbancNum or similar
+            # Robust strategy: Label '입찰공고번호' -> following input
+            
+            self.logger.info(f"Searching for {bid_no}...")
+            
+            # Find input box
+            input_box = None
+            
+            # Try specific ID first (most reliable if known)
+            search_ids = [
+                '#mf_wfm_container_tbxBidPbancNo', # Correct ID found via debug
+                '#mf_wfm_container_txtBidPbancNum',
+                'input[id*="BidPbancNo"]',
+                'input[id*="bidPbancNo"]'
+            ]
+            
+            for selector in search_ids:
+                if page.locator(selector).count() > 0:
+                    input_box = page.locator(selector).first
+                    break
+            
+            # Fallback: Label strategy
+            if not input_box:
+                self.logger.warning("Specific ID not found, trying label strategy...")
+                # Try to find input near "입찰공고번호" label
+                try:
+                    # WebSquare often pairs label and input in a table structure
+                    # Strategy: Find th with label -> get parent tr -> find input in td
+                    label = page.locator('th:has-text("입찰공고번호"), label:has-text("입찰공고번호")').first
+                    if label.is_visible():
+                        row_elem = label.locator('xpath=./parent::tr')
+                        if row_elem.count() > 0:
+                            input_box = row_elem.locator('input').first
+                except: pass
+                
+            if input_box:
+                input_box.fill(bid_no)
+            else:
+                self.logger.error("Could not find search input box for Bid Number")
+                return False
+                
+            # 3. Click Search
+            search_btn = page.locator('#mf_wfm_container_btnS0001')
+            search_btn.click()
+            
+            # Wait for grid to reload
+            time.sleep(2)
+            page.wait_for_selector('#mf_wfm_container_grdBidPbancList_body_table, .w2grid_body_table', timeout=10000)
+            
+            # 4. Parse Result
+            # Should have 1 row
+            notices_data = self.list_parser.parse_page(page)
+            
+            if not notices_data:
+                self.logger.warning(f"No results found for {bid_no}")
+                return False
+                
+            # Find the matching item (search might return partial matches?)
+            target_notice = None
+            for notice in notices_data:
+                # Remove version suffix if present for loose matching?
+                # Usually exact match is best
+                if bid_no in notice.get('bid_notice_number', ''):
+                    target_notice = notice
+                    break
+            
+            if not target_notice:
+                self.logger.warning(f"Search results did not contain {bid_no}")
+                return False
+                
+            # 5. Process
+            self.logger.info(f"Found {bid_no}, processing detail...")
+            self._process_notice(page, target_notice, 1) # page 1 context
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error during search and process for {bid_no}: {e}")
+            return False
 
     def _navigate_to_page(self, page, url: str) -> None:
         """
@@ -505,10 +665,18 @@ class CrawlerEngine(BaseCrawler):
             # Inside the row, find the name column (clickable)
             # WebSquare often puts the click event on a div/nobr inside the TD
             name_cell = row.locator("td[col_id='bidPbancNm']").first
-            link = name_cell.locator("div, nobr, span, a").first
             
-            if not link.is_visible():
+            # Prioritize 'a' tag as it is most likely to be the actionable element
+            # Browser Subagent verification confirmed 'a' tag is the correct clickable element
+            link = name_cell.locator("a").first
+            
+            if not link.count() or not link.is_visible():
+                self.logger.debug("Specific 'a' tag not found, trying generic children...")
+                link = name_cell.locator("span, div, nobr").first
+            
+            if not link.count() or not link.is_visible():
                 # Fallback to cell itself if no inner container found
+                self.logger.debug("No inner link/container found, falling back to cell click")
                 link = name_cell
             
             if not link.is_visible():
@@ -525,7 +693,8 @@ class CrawlerEngine(BaseCrawler):
             # Method 1: Try new tab (shortest timeout since it usually works immediately)
             try:
                 with page.context.expect_page(timeout=3000) as new_page_info:
-                    link.click(force=True)
+                    # Use JS click as native click might be swallowed by event handlers
+                    link.evaluate("el => el.click()")
                 new_page = new_page_info.value
                 new_page.wait_for_load_state()
                 self.logger.info(f"Detail page opened (new tab) for {bid_no}")
@@ -590,26 +759,49 @@ class CrawlerEngine(BaseCrawler):
             if not detail_opened:
                 try:
                     self.logger.debug(f"Checking for in-page detail content for {bid_no}...")
+                    
+                    # Ensure we clicked it. The first click might have been consumed by the expectation failure.
+                    # Or if the first click didn't trigger anything.
+                    try:
+                        self.logger.debug("Re-clicking link (JS) to ensure In-Page navigation triggers...")
+                        link.evaluate("el => el.click()")
+                    except: pass
 
                     # Wait for detail-specific content to appear
                     # Look for indicators that detail page loaded
-                    detail_indicators = [
-                        'th:has-text("개찰장소")',
-                        'th:has-text("계약담당자")',
-                        'th:has-text("납품장소")',
-                        'th:has-text("수요기관")',
+                    detail_selectors = [
+                        # Verified unique Title ID with text check
+                        '#mf_wfm_title_textbox:has-text("상세")', 
+                        '#mf_wfm_title_textbox:has-text("Detail")',
+                        '.w2textbox:has-text("입찰공고진행상세")',
+                        # Tab indicators
+                        'a[title="입찰공고일반"]',
+                        '.w2tabcontrol_contents_wrapper_selected'
                     ]
-
+                    
                     content_found = False
-                    for indicator in detail_indicators:
+                    try:
+                        # Wait for ANY of the unique detailed page indicators
+                        selector = ", ".join(detail_selectors)
+                        page.wait_for_selector(selector, state='visible', timeout=15000)
+                        content_found = True
+                        self.logger.debug("Found unique detail page indicator")
+                    except Exception as e:
+                        self.logger.debug(f"Detail page detection failed: {e}")
+                        content_found = False
+
+                    if not content_found:
+                        # FAILSAFE: Capture state if detection fails
+                        timestamp = int(time.time())
+                        screenshot_path = f"data/debug_failed_open_{bid_no}_{timestamp}.png"
+                        html_path = f"data/debug_failed_open_{bid_no}_{timestamp}.html"
                         try:
-                            elem = page.locator(indicator).first
-                            elem.wait_for(state='visible', timeout=3000)
-                            content_found = True
-                            self.logger.debug(f"Found detail indicator: {indicator}")
-                            break
-                        except:
-                            continue
+                            page.screenshot(path=screenshot_path)
+                            with open(html_path, "w") as f:
+                                f.write(page.content())
+                            self.logger.warning(f"Saved debug screenshot/html to {screenshot_path}")
+                        except Exception as e_debug:
+                            self.logger.warning(f"Failed to save debug info: {e_debug}")
 
                     if content_found:
                         self.logger.info(f"Detail page opened (in-page) for {bid_no}")
@@ -625,103 +817,70 @@ class CrawlerEngine(BaseCrawler):
                         # Step 2: "Announcement Detail" (공고상세) Modal
                         try:
                             # Try to find the "공고상세" button
-                            # Selector based on browser investigation: input#mf_wfm_container_btnBidPbancP or similar
-                            # Also look for text "공고상세"
-                            detail_btn_selectors = [
-                                '#mf_wfm_container_btnBidPbancP',  # Verified selector
-                                'input[value="공고상세"]',
-                                'button:has-text("공고상세")',
-                                '.btn_cm[title*="상세"]'
-                            ]
+                            # Selector based on browser investigation: #mf_wfm_container_btnBidPbancP
+                            detail_btn_selector = '#mf_wfm_container_btnBidPbancP'
                             
                             # Ensure no overlays (loading bars, etc.) block the button
-                            # This addresses the "Modal did not appear" issue caused by interception
                             self._close_modals(page) 
-
-                            detail_btn = None
-                            for selector in detail_btn_selectors:
-                                if page.locator(selector).count() > 0 and page.locator(selector).first.is_visible():
-                                    detail_btn = page.locator(selector).first
-                                    break
                             
-                            if detail_btn:
+                            detail_btn = page.locator(detail_btn_selector)
+                            if detail_btn.is_visible():
                                 self.logger.info("Found 'Announcement Detail' button, clicking...")
                                 detail_btn.click()
-                                time.sleep(2) # Wait for modal
                                 
-                                # Check for modal
-                                modal_selector = '.w2window_active, .w2window_content_body, div[id^="w2window"]'
-                                modal = page.locator(modal_selector).last
+                                # Wait for modal to appear
+                                # Browser subagent found: .w2window_content
+                                page.wait_for_selector('.w2window_content', state='visible', timeout=5000)
+                                self.logger.info("Announcement Detail modal opened")
                                 
-                                if modal.count() > 0 and modal.is_visible():
-                                    self.logger.info("Parsing 'Announcement Detail' modal...")
+                                # Step 3: "Manager Contact" (담당자) Popup
+                                try:
+                                    # Find "View Detail" button next to Valid Manager
+                                    # Selector: [id*='btnUsrDtail']
+                                    manager_btn = page.locator("[id*='btnUsrDtail']").first
                                     
-                                    # Scroll modal content to bottom to ensure all lazy-loaded fields appear
-                                    # STRATEGY: Aggressive recursive scrolling of all potential containers
-                                    try:
-                                        self.logger.debug("Executing aggressive modal scrolling...")
+                                    if manager_btn.is_visible():
+                                        self.logger.info("Found 'Manager View Detail' button, clicking...")
+                                        manager_btn.scroll_into_view_if_needed()
+                                        # Use JS click to bypass overlays/interceptors
+                                        manager_btn.evaluate("el => el.click()")
                                         
-                                        # Scroll the main modal container(s)
-                                        # WebSquare windows often have multiple nested divs
-                                        page.evaluate("""
-                                            (() => {
-                                                const modal = document.querySelector('.w2window_active') || document.querySelector('div[id^="w2window"]');
-                                                if (!modal) return;
-                                                
-                                                // 1. Scroll all scrollable divs inside modal
-                                                const divs = modal.querySelectorAll('div, form, body');
-                                                divs.forEach(div => {
-                                                    if (div.scrollHeight > div.clientHeight) {
-                                                        div.scrollTop = div.scrollHeight;
-                                                    }
-                                                });
-
-                                                // 2. Scroll iframe windows if accessible
-                                                const iframes = modal.querySelectorAll('iframe');
-                                                iframes.forEach(iframe => {
-                                                    try {
-                                                        if (iframe.contentWindow) {
-                                                            iframe.contentWindow.scrollTo(0, iframe.contentDocument.body.scrollHeight);
-                                                            // Also scroll internal divs of iframe
-                                                            iframe.contentDocument.querySelectorAll('div, body').forEach(d => {
-                                                                if (d.scrollHeight > d.clientHeight) {
-                                                                    d.scrollTop = d.scrollHeight;
-                                                                }
-                                                            });
-                                                        }
-                                                    } catch(e) { console.log('Iframe scroll blocked: ' + e); }
-                                                });
-                                            })()
-                                        """)
-                                        time.sleep(1.5) # Wait for lazy load
+                                        # Wait for popup
+                                        # Increase wait time to ensure content loads
+                                        time.sleep(5) 
                                         
-                                        # Double check iframe (Python side handle)
-                                        iframe = modal.locator('iframe').first
-                                        if iframe.count() > 0:
-                                            iframe_element = iframe.element_handle()
-                                            if iframe_element:
-                                                frame = iframe_element.content_frame()
-                                                if frame:
-                                                    frame.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                                                    time.sleep(0.5)
-                                    except Exception as e_scroll:
-                                        self.logger.debug(f"Scroll iteration failed: {e_scroll}")
+                                        # Extract data from popup
+                                        contact_data = self.detail_parser.extract_contact_popup(page)
+                                        if contact_data:
+                                            self.logger.info(f"Extracted contact info: {contact_data}")
+                                            # Map to schema fields
+                                            if 'manager_phone' in contact_data:
+                                                full_data['phone_number'] = contact_data['manager_phone']
+                                            if 'manager_email' in contact_data:
+                                                full_data['email'] = contact_data['manager_email']
+                                            
+                                            # Also keep original keys just in case
+                                            full_data.update(contact_data)
+                                        
+                                        # Close Manager Popup
+                                        # Look for a close button in the top-most modal
+                                        self._close_modals(page, level=2) 
+                                        
+                                    else:
+                                        self.logger.warning("Manager 'View Detail' button not found")
+                                        
+                                except Exception as e_manager:
+                                    self.logger.warning(f"Failed to process Manager Contact popup: {e_manager}")
 
-                                    # Proceed with parsing
-                                    modal_data = self.detail_parser.parse_page(page, base_data) # parse_page handles frame finding
-                                    full_data.update(modal_data)
-                                    self.logger.debug(f"Merged {len(modal_data)} fields from modal")
-                                    
-                                    # Close modal
-                                    self._close_detail_modal(page)
-                                    time.sleep(1)
-                                else:
-                                    self.logger.warning("Modal did not appear after clicking 'Announcement Detail'")
+                                # Close Announcement Modal
+                                self._close_detail_modal(page)
                             else:
-                                self.logger.debug("'Announcement Detail' button not found")
+                                self.logger.warning("'Announcement Detail' button not found")
 
-                        except Exception as e_modal_step:
-                            self.logger.warning(f"Failed to process 'Announcement Detail' modal: {e_modal_step}")
+                        except Exception as e_step2:
+                            self.logger.warning(f"Step 2 (Announcement Detail) failed: {e_step2}") 
+
+
 
                         # Step 3: "Base Price" (기준금액) Tab
                         try:

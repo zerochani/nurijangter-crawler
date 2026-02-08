@@ -111,6 +111,12 @@ def parse_arguments():
         help='Dry run mode - parse config and show settings without crawling'
     )
 
+    parser.add_argument(
+        '--retry-failed',
+        action='store_true',
+        help='Retry crawling failed items from checkpoint'
+    )
+
     return parser.parse_args()
 
 
@@ -305,7 +311,12 @@ def main():
     resume = not args.no_resume
 
     # Run crawler
-    if args.scheduled or config.get('scheduler', {}).get('enabled', False):
+    if args.retry_failed:
+        logger.info("Retrying failed items from checkpoint...")
+        # Force resume=True to load the checkpoint containing failed items
+        crawler = CrawlerEngine(config)
+        crawler.retry_failed_items()
+    elif args.scheduled or config.get('scheduler', {}).get('enabled', False):
         run_scheduled(config, resume=resume)
     else:
         run_crawler(config, resume=resume)

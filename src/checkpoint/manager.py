@@ -191,6 +191,25 @@ class CheckpointManager:
         self.failed_items.append(failed_item)
         self.statistics["total_failed"] = len(self.failed_items)
 
+    def remove_failed_item(self, item_id: str) -> None:
+        """
+        Remove an item from the failed items list.
+
+        Args:
+            item_id: Unique identifier for the item to remove
+        """
+        initial_count = len(self.failed_items)
+        self.failed_items = [
+            item for item in self.failed_items 
+            if item.get("item_id") != item_id
+        ]
+        
+        if len(self.failed_items) < initial_count:
+            self.statistics["total_failed"] = len(self.failed_items)
+            # Save immediately to persist the removal
+            self.save_checkpoint(force=True)
+            logger.info(f"Removed item {item_id} from failed items list")
+
     def is_item_processed(self, item_id: str) -> bool:
         """
         Check if an item has been processed.

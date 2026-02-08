@@ -67,14 +67,6 @@ class DetailPageParser:
             # Extract all table data first
             all_data = self._extract_all_table_data(target_context)
             
-            # --- NEW: Extract Contact Detail Popup ---
-            try:
-                contact_data = self._extract_contact_popup(page)
-                if contact_data:
-                    logger.info(f"Extracted contact info from popup: {contact_data}")
-                    all_data.update(contact_data)
-            except Exception as e:
-                logger.warning(f"Failed to extract contact popup: {e}")
             # ----------------------------------------
 
             logger.debug(f"Extracted {len(all_data)} key-value pairs from tables")
@@ -176,7 +168,7 @@ class DetailPageParser:
                 try:
                     # CHECK: Is this TH inside the Search Filter?
                     # The Search Filter causes "garbage" data (e.g. date picker ranges)
-                    is_search_filter = th.evaluate("el => el.closest('#mf_wfm_container_shcBidPbanc, #mf_wfm_container_grpSrchBox, .sh_group') !== null")
+                    is_search_filter = th.evaluate("el => el.closest('#mf_wfm_container_shcBidPbanc, #mf_wfm_container_grpSrchBox, .sh_group, .search_box, .search_area, .tbl_search') !== null")
                     if is_search_filter:
                         continue
 
@@ -198,8 +190,12 @@ class DetailPageParser:
                     if td_text:
                         value = self._clean_text(td_text)
                         if value:
-                            data[label] = value
-                            logger.debug(f"[XPath] {label} = {value[:50]}")
+                            # Ignore garbage values (too long)
+                            if len(value) > 100:
+                                logger.debug(f"[XPath] Skipped long value for {label}: {len(value)} chars")
+                            else:
+                                data[label] = value
+                                logger.debug(f"[XPath] {label} = {value[:50]}")
                 except Exception as e:
                     logger.debug(f"Failed to extract from TH: {e}")
                     continue
@@ -212,12 +208,19 @@ class DetailPageParser:
             for table in tables:
                 # CHECK: Is this table inside Search Filter?
                 try:
-                    if table.evaluate("el => el.closest('#mf_wfm_container_shcBidPbanc, #mf_wfm_container_grpSrchBox, .sh_group') !== null"):
+                    if table.evaluate("el => el.closest('#mf_wfm_container_shcBidPbanc, #mf_wfm_container_grpSrchBox, .sh_group, .search_box, .search_area, .tbl_search') !== null"):
                         continue
                 except:
                     pass
 
                 rows = table.query_selector_all('tr')
+                # DEBUG: Log first row of each table to see if we're in the right place
+                if rows:
+                    try:
+                        first_row_text = rows[0].evaluate("el => el.innerText").replace('\n', ' ')
+                        logger.info(f"DEBUG TABLE: Found table with {len(rows)} rows. Row 1: {first_row_text[:100]}...")
+                    except: pass
+
                 for row in rows:
                     try:
                         # Get all cells
@@ -232,14 +235,28 @@ class DetailPageParser:
 
                                 tag1 = cell1.evaluate("el => el.tagName")
                                 tag2 = cell2.evaluate("el => el.tagName")
+                                class1 = cell1.evaluate("el => el.className")
 
-                                # TH followed by TD
-                                if tag1 == "TH" and tag2 == "TD":
-                                    label = self._clean_text(cell1.inner_text())
+                                # TH followed by TD (or TD.w2tb_th followed by TD)
+                                is_header = (tag1 == "TH") or (tag1 == "TD" and "w2tb_th" in class1)
+                                
+                                # DEBUG LOGGING
+                                raw_text = self._clean_text(cell1.inner_text())
+                                if "개찰일시" in raw_text:
+                                    logger.info(f"DEBUG STRATEGY 2: Found '개찰일시' candidate. Tag1={tag1}, Class1='{class1}', IsHeader={is_header}, Tag2={tag2}")
+
+                                if is_header and tag2 == "TD":
+                                    label = raw_text
                                     value = self._clean_text(cell2.inner_text())
+                                    
+                                    if "개찰일시" in label:
+                                         logger.info(f"DEBUG STRATEGY 2: Extracted '개찰일시' = '{value}'")
 
                                     if label and value:
-                                        if label not in data:  # Don't overwrite
+                                        # Ignore garbage values (too long)
+                                        if len(value) > 100:
+                                             logger.debug(f"[Table] Skipped long value for {label}: {len(value)} chars")
+                                        elif label not in data:  # Don't overwrite
                                             data[label] = value
                                             logger.debug(f"[Table] {label} = {value[:50]}")
 
@@ -247,7 +264,7 @@ class DetailPageParser:
                                 else:
                                     i += 1
                     except Exception as e:
-                        logger.debug(f"Failed to parse row: {e}")
+                        logger.info(f"Failed to parse row: {e}")
                         continue
         except Exception as e:
             logger.debug(f"Strategy 2 failed: {e}")
@@ -255,12 +272,12 @@ class DetailPageParser:
         # Strategy 3: Label-value divs/spans (less common in tables but worth trying)
         try:
             # Look for .label or .th class followed by .value or .td class
-            # Look for .label or .th class followed by .value or .td class
-            label_elements = frame.query_selector_all('.label, .th, span.label, div.label')
+            # Include 'label' tag
+            label_elements = frame.query_selector_all('.label, .th, span.label, div.label, label')
             for label_el in label_elements:
                 try:
                     # CHECK: Is this Label inside Search Filter?
-                    if label_el.evaluate("el => el.closest('#mf_wfm_container_shcBidPbanc, #mf_wfm_container_grpSrchBox, .sh_group') !== null"):
+                    if label_el.evaluate("el => el.closest('#mf_wfm_container_shcBidPbanc, #mf_wfm_container_grpSrchBox, .sh_group, .search_box, .search_area, .tbl_search') !== null"):
                         continue
 
                     label = self._clean_text(label_el.inner_text())
@@ -274,17 +291,27 @@ class DetailPageParser:
                             let sibling = el.nextElementSibling;
                             if (sibling && (sibling.classList.contains('value') ||
                                            sibling.classList.contains('td') ||
+                                           sibling.classList.contains('w2tb_td') ||
                                            sibling.tagName === 'TD')) {
                                 return sibling;
                             }
 
-                            // Try parent's next child
+                            // Try parent's next child (sibling of label)
                             let parent = el.parentElement;
                             if (parent) {
                                 let children = Array.from(parent.children);
                                 let idx = children.indexOf(el);
                                 if (idx >= 0 && idx < children.length - 1) {
                                     return children[idx + 1];
+                                }
+                                
+                                // NEW: Try Parent's Next Sibling (TD -> TD)
+                                // If label is inside a TD/TH, the value might be in the next TD
+                                if (parent.tagName === 'TD' || parent.tagName === 'TH') {
+                                    let parentSibling = parent.nextElementSibling;
+                                    if (parentSibling && parentSibling.tagName === 'TD') {
+                                        return parentSibling;
+                                    }
                                 }
                             }
 
@@ -294,9 +321,12 @@ class DetailPageParser:
 
                     if value_el:
                         value = self._clean_text(value_el.evaluate("el => el.innerText"))
-                        if value and label not in data:
-                            data[label] = value
-                            logger.debug(f"[Div] {label} = {value[:50]}")
+                        if value:
+                             if len(value) > 100:
+                                 logger.debug(f"[Div] Skipped long value for {label}")
+                             elif label not in data:
+                                data[label] = value
+                                logger.debug(f"[Div] {label} = {value[:50]}")
                 except:
                     continue
         except Exception as e:
@@ -391,7 +421,7 @@ class DetailPageParser:
         if field_name == 'opening_date':
             # Check length to filter out garbage data (e.g., long list of years from search filter)
             if len(str(value)) > 50:
-                logger.warning(f"Likely garbage data detected for opening_date (length {len(str(value))}). Rejected.")
+                logger.warning(f"Likely garbage data detected for opening_date (length {len(str(value))}). Content start: {str(value)[:200]}...")
                 return False
 
         import re
@@ -562,15 +592,20 @@ class DetailPageParser:
     def _clean_opening_date(self, text: str) -> str:
         """
         Clean opening_date field which often contains calendar widget text.
-        Extracts only the date and time pattern (YYYY/MM/DD HH:MM).
+        Extracts only the date and time pattern.
         """
         if not text:
             return ""
             
-        # Strategy 1: strict date<space>time pattern
+        # Common usage: "2026/02/10 10:00" or "2026-02-10 10:00"
         match = re.search(r'(\d{4}[/-]\d{2}[/-]\d{2})\s*(\d{2}:\d{2})', text)
         if match:
             return f"{match.group(1)} {match.group(2)}"
+
+        # Korean format: "2026년 02월 10일 10:00"
+        kor_match = re.search(r'(\d{4}년\s*\d{1,2}월\s*\d{1,2}일)\s*(\d{2}:\d{2})', text)
+        if kor_match:
+             return f"{kor_match.group(1)} {kor_match.group(2)}"
 
         # Strategy 2: find date and time separately (if garbage in between)
         date_match = re.search(r'(\d{4}[/-]\d{2}[/-]\d{2})', text)
@@ -581,82 +616,48 @@ class DetailPageParser:
             
         return text
 
-    def _extract_contact_popup(self, page: Page) -> Dict[str, str]:
+    def extract_contact_popup(self, page: Page) -> Dict[str, Any]:
         """
-        Click the 'Detail View' button to open contact officer popup and extract phone/email.
+        Extract contact information from the manager popup.
         
-        Selectors identified:
-        - Button ID: #mf_wfm_container_btnUsrDtail
-        - Popup Close ID: #mf_wfm_container_BidPbancUsrP_close
-        - Phone XPath: //th[.//label[contains(text(), '연락처')]]/following-sibling::td//span
-        - Email XPath: //th[.//label[contains(text(), '이메일')]]/following-sibling::td//span
+        Args:
+            page: Playwright page object (already switched to popup context if needed)
+            
+        Returns:
+            Dictionary with contact info (manager_phone, manager_email)
         """
         data = {}
-        
         try:
-            # 1. Find and Click Button
-            # Try specific ID first, then generic '상세보기' button
-            button_selector = '#mf_wfm_container_btnUsrDtail'
-            button = page.query_selector(button_selector)
+            logger.info("Extracting data from Manager Contact Popup...")
             
-            if not button or not button.is_visible():
-                # Fallback: Find button with text '상세보기' next to '입찰담당정보'
-                logger.debug("Specific detail button not found, trying generic search...")
-                # Simple heuristic: Any button with '상세보기' text
-                button = page.get_by_text("상세보기", exact=False).first
+            # Browser subagent identified robust XPath with data-title attribute
+            # These are more stable than label-based searches
             
-            if button and button.is_visible():
-                logger.debug("Found 'Contact Detail' button, clicking...")
-                button.click()
-                
-                # 2. Wait for Popup
-                # Wait for any typical popup container or specific close button
-                try:
-                    page.wait_for_selector('#mf_wfm_container_BidPbancUsrP_close, .w2window_content_body', timeout=3000)
-                    # Small sleep to ensure text rendered
-                    page.wait_for_timeout(500)
-                except:
-                    logger.warning("Popup did not appear after clicking detail button")
-                    return {}
+            # Phone: //td[@data-title='연락처']/span
+            phone_elem = page.locator("xpath=//td[@data-title='연락처']/span").first
+            if phone_elem.count() > 0:
+                text = self._clean_text(phone_elem.inner_text())
+                if text:
+                    data['manager_phone'] = text
+                    logger.info(f"Found phone: {text}")
 
-                # 3. Extract Data using robust XPath
-                # Helper to extract text via XPath
-                def get_text_by_xpath(xpath):
-                    try:
-                        el = page.query_selector(f"xpath={xpath}")
-                        return self._clean_text(el.inner_text()) if el else None
-                    except:
-                        return None
-                
-                phone = get_text_by_xpath("//th[.//label[contains(text(), '연락처')]]/following-sibling::td")
-                email = get_text_by_xpath("//th[.//label[contains(text(), '이메일')]]/following-sibling::td")
-                
-                if phone:
-                    # Clean up: sometimes contains / or multiple numbers. Take first valid one? 
-                    # For now just save raw cleaned text.
-                    data['전화번호'] = phone
-                if email:
-                    data['이메일'] = email
-                
-                logger.debug(f"Popup extraction result: {data}")
+            # Email: //td[@data-title='이메일']/span
+            email_elem = page.locator("xpath=//td[@data-title='이메일']/span").first
+            if email_elem.count() > 0:
+                text = self._clean_text(email_elem.inner_text())
+                if text:
+                    data['manager_email'] = text
+                    logger.info(f"Found email: {text}")
 
-                # 4. Close Popup
+            if not data:
+                logger.warning("No contact data found in popup (selectors matched nothing)")
+                # Log page content specific to popup frame/modal if possible
                 try:
-                    close_btn = page.query_selector('#mf_wfm_container_BidPbancUsrP_close')
-                    if close_btn:
-                        close_btn.click()
-                    else:
-                        # Fallback close
-                        page.keyboard.press('Escape')
-                except Exception as e:
-                    logger.warning(f"Failed to close popup: {e}")
+                    poup_content = page.locator(".w2popup_window").last.inner_html()
+                    logger.info(f"Popup content snapshot: {poup_content[:500]}...")
+                except: pass
 
         except Exception as e:
-            logger.debug(f"Error in contact popup extraction: {e}")
-            # Attempt to recover by pressing Escape just in case popup is stuck open
-            try:
-                page.keyboard.press('Escape')
-            except:
-                pass
+            logger.warning(f"Failed to extract contact popup data: {e}")
             
         return data
