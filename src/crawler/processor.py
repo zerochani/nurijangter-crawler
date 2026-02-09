@@ -99,6 +99,23 @@ class NoticeProcessor:
 
             # Add to collection
             self.collected_notices.add_notice(bid_notice)
+
+            # VALIDATION: Check for data quality
+            # If critical fields are missing, we might want to retry later
+            # User request: "null이 많은 데이터는 실패된 항목에 추가"
+            null_count = 0
+            critical_fields = ['budget_amount', 'base_price', 'opening_date', 'pre_qualification', 'contract_bond']
+            for field in critical_fields:
+                if not getattr(bid_notice, field):
+                    null_count += 1
+            
+            # If mostly empty (heuristic: 3 or more critical fields missing), consider it a partial failure
+            # But we already added it to collection. 
+            # Strategy: If it's REALLY bad, remove from collection and raise exception so it goes to failed_items
+            if null_count >= 4 and not bid_notice.notes: # notes might explain why (e.g. cancelled)
+                self.collected_notices.notices.pop() # Remove the last added item
+                raise ValueError(f"Too many missing fields ({null_count}/{len(critical_fields)} critical fields null). Treating as failure for retry.")
+
             self.stats['items_extracted'] += 1
 
             # Mark as seen

@@ -41,6 +41,8 @@ ENV/
 # Data and outputs
 data/*.json
 data/*.csv
+data/*.html
+data/*.png 
 !data/.gitkeep
 
 # Logs
