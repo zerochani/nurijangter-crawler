@@ -45,6 +45,18 @@ python main.py --log-level DEBUG
 python main.py --scheduled
 ```
 
+**특정 페이지 크롤링 (범위 지정 가능)**
+```bash
+# 5페이지만 크롤링
+python main.py --pages 5
+
+# 2페이지부터 5페이지까지 크롤링
+python main.py --pages 2-5
+
+# 10페이지부터 끝까지 크롤링
+python main.py --pages 10-
+```
+
 **재시도 실행 (실패 항목 다시 처리)**
 ```bash
 python main.py --retry-failed
@@ -183,6 +195,11 @@ main.py
   - Rate Limit 위반 방지 (IP 차단 위험)
   - 디버깅 용이성
   - 안정성 우선 (속도는 나중에 최적화 가능)
+
+#### 5. 데이터 품질 보증 (New)
+- **전략**: 필드 검증 강화
+- **구현**: `budget_amount`, `base_price` 등 핵심 필드 중 4개 이상 누락 시 실패 처리
+- **효과**: 불완전한 데이터가 DB/파일에 저장되는 것을 방지하고 재시도 큐로 이동시킴
 
 ### 설계 결정 요약
 

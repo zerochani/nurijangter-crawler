@@ -133,16 +133,48 @@ class CrawlerEngine(BaseCrawler):
         self.logger.log_crawl_start(self.config.get('website', {}).get('base_url', 'NuriJangter'))
 
         try:
-            # Load checkpoint if resuming
-            if resume and self.checkpoint_manager.load_checkpoint():
+            # Parse pages argument if present
+            pages_arg = self.pagination_config.get('pages')
+            start_page = 1
+            end_page = None
+            
+            if pages_arg:
+                try:
+                    if '-' in pages_arg:
+                        start_str, end_str = pages_arg.split('-')
+                        start_page = int(start_str) if start_str else 1
+                        end_page = int(end_str) if end_str else None
+                    else:
+                        start_page = int(pages_arg)
+                        end_page = start_page
+                    
+                    self.logger.info(f"Targeting specific pages: Start={start_page}, End={end_page}")
+                    
+                    # Override checkpoint if specific pages requested
+                    self.checkpoint_manager.current_page = start_page
+                    
+                except ValueError:
+                    self.logger.error(f"Invalid pages argument: {pages_arg}")
+                    raise
+
+            # Load checkpoint if resuming (and not overridden by specific pages)
+            if resume and not pages_arg and self.checkpoint_manager.load_checkpoint():
                 self.logger.log_checkpoint_load(
                     f"page {self.checkpoint_manager.current_page}"
                 )
-            else:
+            elif not pages_arg:
                 self.checkpoint_manager.initialize_crawl({
                     'target': 'NuriJangter',
                     'config': self.config.get('website', {})
                 })
+            else:
+                # Initialize for specific pages
+                 self.checkpoint_manager.initialize_crawl({
+                    'target': 'NuriJangter',
+                    'config': self.config.get('website', {}),
+                    'pages_mode': True
+                })
+                 self.checkpoint_manager.current_page = start_page
 
             # Start browser
             with self.browser_manager as browser:
@@ -155,8 +187,16 @@ class CrawlerEngine(BaseCrawler):
 
                 self.navigator.navigate_to_page(page, list_url)
 
+                # Jump to start page if needed
+                if self.checkpoint_manager.current_page > 1:
+                     try:
+                        self.navigator.restore_pagination(page, self.checkpoint_manager.current_page)
+                     except Exception as e:
+                        self.logger.error(f"Critical: Failed to jump to start page {self.checkpoint_manager.current_page}: {e}")
+                        raise # Abort crawl
+
                 # Crawl pages
-                self._crawl_list_pages(page)
+                self._crawl_list_pages(page, end_page=end_page)
 
             # Mark crawl as complete
             self.checkpoint_manager.complete_crawl(success=True)
@@ -202,18 +242,24 @@ class CrawlerEngine(BaseCrawler):
             self.logger.error(f"Retry process failed: {e}")
 
 
-    def _crawl_list_pages(self, page) -> None:
+    def _crawl_list_pages(self, page, end_page: Optional[int] = None) -> None:
         """
         Crawl all list pages.
 
         Args:
             page: Playwright page object
+            end_page: Optional end page number to stop at
         """
         max_pages = self.pagination_config.get('max_pages', 0)
         current_page_num = self.checkpoint_manager.current_page
 
         while True:
             try:
+                # Check for specific end page
+                if end_page is not None and current_page_num > end_page:
+                    self.logger.info(f"Reached target end page: {end_page}")
+                    break
+
                 # Check if we've reached max pages
                 if max_pages > 0 and current_page_num > max_pages:
                     self.logger.info(f"Reached max pages limit: {max_pages}")

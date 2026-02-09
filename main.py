@@ -117,6 +117,12 @@ def parse_arguments():
         help='Retry crawling failed items from checkpoint'
     )
 
+    parser.add_argument(
+        '--pages',
+        type=str,
+        help='Crawl specific pages (e.g., "5", "1-10", "5-")'
+    )
+
     return parser.parse_args()
 
 
@@ -258,6 +264,9 @@ def main():
 
     if args.scheduled:
         config.setdefault('scheduler', {})['enabled'] = True
+
+    if args.pages:
+        config.setdefault('crawler', {}).setdefault('pagination', {})['pages'] = args.pages
 
     # Setup directories
     setup_directories(config)

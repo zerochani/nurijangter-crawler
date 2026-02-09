@@ -127,13 +127,41 @@ class ListPageParser:
     def has_next_page(self, page: Page) -> bool:
         """Check if there is a next page."""
         try:
+            # 1. Check for "Next" (arrow) button
             # WebSquare pagination next button
             next_button = page.locator('#mf_wfm_container_pagelist_next_btn a, .w2pageList_next_btn').first
             
             if next_button.count() > 0:
-                # Check if visible and not disabled
                 if next_button.is_visible():
                     return True
+
+            # 2. Check for the next numbered page
+            # Identify current page number
+            current_page_elem = page.locator('.w2pageList_col_selected, .w2pageList_label_selected').first
+            current_page_num = 1
+            if current_page_elem.count() > 0:
+                try:
+                    current_page_num = int(self._clean_text(current_page_elem.inner_text()))
+                except ValueError:
+                    pass
+
+            next_page_num = current_page_num + 1
+            
+            # Check if button for next page number exists
+            # ID pattern: mf_wfm_container_pagelist_page_{number}
+            next_page_id = f"mf_wfm_container_pagelist_page_{next_page_num}"
+            
+            # Use JS to check existence
+            js_script = f"""
+                (function() {{
+                    var btn = document.getElementById('{next_page_id}');
+                    return btn != null;
+                }})();
+            """
+            
+            if page.evaluate(js_script):
+                return True
+                
             return False
         except Exception as e:
             logger.debug(f"Error checking for next page: {e}")

@@ -193,7 +193,11 @@ class NoticeProcessor:
                 
                 # RESTORE PAGINATION if needed
                 if current_page_num > 1:
-                    self.navigator.restore_pagination(page, current_page_num)
+                    try:
+                        self.navigator.restore_pagination(page, current_page_num)
+                    except Exception as e:
+                        self.logger.warning(f"Restore pagination failed during Soft Reset: {e}")
+                        # Continue to check row, it will likely fail and trigger Hard Reset
 
                 # Re-try finding row after soft reset
                 list_frame = self.navigator.get_list_frame(page)
@@ -207,7 +211,11 @@ class NoticeProcessor:
                 
                 # RESTORE PAGINATION if needed (Critical step)
                 if current_page_num > 1:
-                    self.navigator.restore_pagination(page, current_page_num)
+                    try:
+                        self.navigator.restore_pagination(page, current_page_num)
+                    except Exception as e:
+                        self.logger.error(f"Restore pagination failed during Hard Reset: {e}")
+                        # If this fails, we are truly lost for this page, but maybe next item will work
 
                 # Re-try finding row after hard reset
                 list_frame = self.navigator.get_list_frame(page)

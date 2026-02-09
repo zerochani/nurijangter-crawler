@@ -177,6 +177,13 @@ class Navigator:
                     page.wait_for_selector("#mf_wfm_container_grdBidPbancList_body_table, .w2grid_body_table", timeout=5000)
                     # CRITICAL: Wait for actual rows to be present
                     page.wait_for_selector("tr.grid_body_row", timeout=5000)
+                    
+                    # Also wait for pagination to ensure full load
+                    try:
+                        page.wait_for_selector("#mf_wfm_container_pagelist, .w2pageList", timeout=3000)
+                    except:
+                        self.logger.warning("Pagination container not found after soft reset")
+                        
                     time.sleep(1) # Extra buffer
                 except:
                     pass
@@ -247,6 +254,10 @@ class Navigator:
         self.logger.info(f"Restoring pagination to page {target_page_num}...")
         
         try:
+            # 0. Ensure no blocking modals
+            self.close_modals(page)
+            time.sleep(1)
+
             # We need to jump from Page 1 to Target Page
             # The logic depends on how far we need to go.
             # Page groups are usually 10 pages (1-10, 11-20, etc.)
@@ -258,6 +269,10 @@ class Navigator:
             # Navigate groups if needed
             while current_group_start < target_group_start:
                 self.logger.debug(f"Jumping to next group from {current_group_start}...")
+                
+                # Check for blocking modals again before click
+                if page.locator('.w2window_active, .w2window_cover').count() > 0:
+                     self.close_modals(page)
                 
                 # Click next group button (>)
                 # Use list_parser logic for finding next group
@@ -275,15 +290,19 @@ class Navigator:
                     current_group_start += 10
                 else:
                     self.logger.error("Failed to find next group button during restoration")
-                    return
+                    raise Exception("Next group button not found")
 
             # Now we are in the correct group (or close to it)
+            # Check for blocking modals again before click
+            if page.locator('.w2window_active, .w2window_cover').count() > 0:
+                    self.close_modals(page)
+
             # Click the specific page number
             page_btn_selector = f"#mf_wfm_container_pagelist_page_{target_page_num}"
             
             # Try ID first
             if page.locator(page_btn_selector).count() > 0:
-                 page.locator(page_btn_selector).first.click()
+                 page.locator(page_btn_selector).first.click(force=True) # Use force click
                  time.sleep(2)
                  self.logger.info(f"Restored to page {target_page_num}")
                  return
@@ -292,14 +311,22 @@ class Navigator:
             # This is risky if multiple numbers exist, but usually pagination is unique in the footer
             try:
                 # Find link/li inside pagelist
-                page.locator(f".w2pageList_li:has-text('{target_page_num}')").first.click()
+                page.locator(f".w2pageList_li:has-text('{target_page_num}')").first.click(force=True)
                 time.sleep(2)
                 self.logger.info(f"Restored to page {target_page_num} via text match")
             except:
+                # Debugging: Log what is actually visible
+                try:
+                    visible_pages = page.locator(".w2pageList_li, .w2pageList_label").all_inner_texts()
+                    self.logger.error(f"Visible pagination buttons: {visible_pages}")
+                except:
+                    pass
                 self.logger.error(f"Failed to find button for page {target_page_num}")
+                raise Exception(f"Page button {target_page_num} not found")
 
         except Exception as e:
             self.logger.error(f"Pagination restoration failed: {e}")
+            raise # Re-raise to let Engine handle it (abort crawl)
 
     def get_list_frame(self, page):
         """Find the frame containing the bid notice list."""
