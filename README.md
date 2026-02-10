@@ -142,15 +142,22 @@ playwright --version
 ```
 main.py
   └─ CrawlerEngine (오케스트레이션)
+      ├─ Navigator (SPA 네비게이션 & 모달 제어)
+      ├─ Processor (개별 공고 처리 & 상세 수집)
+      │   ├─ ListParser (목록 페이지 파싱)
+      │   └─ DetailParser (상세 페이지 파싱)
+      ├─ RetryManager (실패 항목 재시도 & 검색)
       ├─ BrowserManager (Playwright 제어)
-      ├─ ListParser (목록 페이지 파싱)
-      ├─ DetailParser (상세 페이지 파싱)
       ├─ CheckpointManager (상태 저장/복원)
       ├─ DeduplicationManager (중복 방지)
       └─ Storage (JSON/CSV 저장)
 ```
 
-**설계 의도**: 각 모듈을 독립적으로 테스트/교체 가능하도록 분리
+**설계 의도**:
+- **Navigator**: 복잡한 SPA(Single Page Application) 탐색과 팝업 처리를 전담
+- **Processor**: 공고 데이터 수집 로직을 분리하여 유지보수성 향상
+- **RetryManager**: 실패한 항목을 독립적으로 재처리하는 전용 모듈
+- 각 모듈을 독립적으로 테스트 및 교체 가능하도록 분리
 
 #### 2. 상세페이지 열기: 3-Way Fallback
 ```python
