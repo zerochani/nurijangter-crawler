@@ -7,7 +7,7 @@ and providing a standardized structure for storage and processing.
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, ConfigDict
 from enum import Enum
 
 
@@ -36,9 +36,8 @@ class AttachedFile(BaseModel):
     size: Optional[str] = Field(None, description="File size")
     file_type: Optional[str] = Field(None, description="File type/extension")
 
-    class Config:
-        """Pydantic configuration."""
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "filename": "입찰공고서.pdf",
                 "url": "https://www.g2b.go.kr/...",
@@ -46,6 +45,7 @@ class AttachedFile(BaseModel):
                 "file_type": "pdf"
             }
         }
+    )
 
 
 class BidNotice(BaseModel):
@@ -144,12 +144,8 @@ class BidNotice(BaseModel):
             return v
         return []
 
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "bid_notice_number": "20240101234-00",
                 "bid_notice_name": "2024년도 사무용품 구매",
@@ -164,6 +160,7 @@ class BidNotice(BaseModel):
                 "phone_number": "02-1234-5678"
             }
         }
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary with proper serialization."""
@@ -210,11 +207,7 @@ class BidNoticeList(BaseModel):
     crawl_completed_at: Optional[datetime] = Field(None, description="When the crawl completed")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata about the crawl")
 
-    class Config:
-        """Pydantic configuration."""
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
+    # model_config = ConfigDict() # Empty config or remove if not needed
 
     def add_notice(self, notice: BidNotice) -> None:
         """Add a bid notice to the collection."""

@@ -60,7 +60,19 @@ def test_crawler_run_flow(mock_config, mock_managers):
     
     # Mock list parser to return 1 item on first page, then nothing
     crawler.list_parser.parse_page.side_effect = [
-        [{'bid_notice_number': '123'}], # Page 1
+        [{
+            'bid_notice_number': '123',
+            'bid_notice_name': 'Test Notice',
+            'announcement_agency': 'Test Agency',
+            'bid_notice_number': '123',
+        'bid_notice_name': 'Detail Name', # Enriched data
+        'announcement_agency': 'Agency',
+        'opening_date': '2023-01-01',
+        'budget_amount': '10000',
+        'base_price': '10000',
+            'budget_amount': '1000',
+            'base_price': '1000'
+        }], # Page 1
         [] # Page 2 (Stop)
     ]
     crawler.list_parser.has_next_page.return_value = True
@@ -97,8 +109,30 @@ def test_crawler_deduplication(mock_config, mock_managers):
     
     # Setup list parser
     crawler.list_parser.parse_page.return_value = [
-        {'bid_notice_number': '123'}, 
-        {'bid_notice_number': '456'}
+        {
+            'bid_notice_number': '123',
+            'bid_notice_name': 'Test 1',
+            'announcement_agency': 'Agency',
+            'bid_notice_number': '123',
+        'bid_notice_name': 'Detail Name', # Enriched data
+        'announcement_agency': 'Agency',
+        'opening_date': '2023-01-01',
+        'budget_amount': '10000',
+        'base_price': '10000', 
+            'budget_amount': '1000'
+        }, 
+        {
+            'bid_notice_number': '456',
+            'bid_notice_name': 'Test 2',
+            'announcement_agency': 'Agency',
+            'bid_notice_number': '123',
+        'bid_notice_name': 'Detail Name', # Enriched data
+        'announcement_agency': 'Agency',
+        'opening_date': '2023-01-01',
+        'budget_amount': '10000',
+        'base_price': '10000',
+            'budget_amount': '1000'
+        }
     ]
     
     # Setup duplicates
@@ -115,8 +149,20 @@ def test_crawler_deduplication(mock_config, mock_managers):
     
     # Manually call methods on processor to verify logic directly first
     # This ensures we are testing the logic, not the loop mechanics
-    crawler.processor.process_notice(mock_page, {'bid_notice_number': '123'}) # Should be duplicate
-    crawler.processor.process_notice(mock_page, {'bid_notice_number': '456'}) # Should be new
+    crawler.processor.process_notice(mock_page, {
+        'bid_notice_number': '123',
+        'bid_notice_name': 'Test 1',
+        'announcement_agency': 'Agency',
+        'opening_date': '2023-01-01', 
+        'budget_amount': '1000'
+    }) # Should be duplicate
+    crawler.processor.process_notice(mock_page, {
+        'bid_notice_number': '456',
+        'bid_notice_name': 'Test 2',
+        'announcement_agency': 'Agency',
+        'opening_date': '2023-01-01',
+        'budget_amount': '1000'
+    }) # Should be new
     
     # Only 1 item should be collected (456)
     assert len(crawler.collected_notices.notices) == 1
@@ -139,7 +185,12 @@ def test_crawler_detail_fetch(mock_config, mock_managers):
         'bid_notice_number': '123',
         'bid_notice_name': 'Detail Name', # Enriched data
         'announcement_agency': 'Agency',
-        'opening_date': '2023-01-01'
+        'bid_notice_number': '123',
+        'bid_notice_name': 'Detail Name', # Enriched data
+        'announcement_agency': 'Agency',
+        'opening_date': '2023-01-01',
+        'budget_amount': '10000',
+        'base_price': '10000'
     })
     
     crawler.checkpoint_manager.is_item_processed.return_value = False
@@ -164,13 +215,17 @@ def test_crawler_error_handling(mock_config, mock_managers):
     # Use patch.object to mock the method on the instance reliably
     with patch.object(crawler.processor, 'fetch_detail_page', side_effect=[
         Exception("Network Error"),
-        {'bid_notice_number': '2', 'announcement_agency': 'A', 'opening_date': '2023-01-01'}
+        {'bid_notice_number': '2', 'announcement_agency': 'A', 'opening_date': '2023-01-01', 'budget_amount': '1000', 'base_price': '1000'}
     ]) as mock_fetch:
         # 1. Item that raises exception
         crawler.processor.process_notice(mock_page, {'bid_notice_number': '1', 'has_detail': True})
         
         # 2. Item that succeeds
-        crawler.processor.process_notice(mock_page, {'bid_notice_number': '2', 'has_detail': True})
+        crawler.processor.process_notice(mock_page, {
+            'bid_notice_number': '2', 'has_detail': True,
+            'bid_notice_name': 'Notice 2', 'announcement_agency': 'Agency',
+            'opening_date': '2023-01-01', 'budget_amount': '1000'
+        })
         
         # Verification
         # Note: Mocking patch.object seems to have issues in this specific test environment where
