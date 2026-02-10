@@ -1,7 +1,7 @@
 """
-List page parser for NuriJangter bid notices.
+누리장터 목록 페이지 파서 (List Page Parser for NuriJangter)
 
-This module extracts bid notice information from list pages.
+이 모듈은 입찰 공고 목록 페이지에서 정보를 추출합니다.
 """
 
 from typing import List, Dict, Any, Optional
@@ -15,43 +15,44 @@ logger = logging.getLogger(__name__)
 
 class ListPageParser:
     """
-    Parser for extracting bid notices from list pages.
+    목록 페이지에서 입찰 공고를 추출하는 파서입니다.
 
-    Handles pagination and extracts basic information about each bid notice.
+    페이지네이션을 처리하고 각 입찰 공고의 기본 정보를 추출합니다.
     """
 
     def __init__(self, config: Dict[str, Any]):
         """
-        Initialize list page parser.
+        목록 페이지 파서를 초기화합니다.
 
         Args:
-            config: Configuration dictionary with extraction settings
+            config: 추출 설정이 포함된 설정 딕셔너리
         """
         self.config = config
         self.list_fields = config.get('extraction', {}).get('list_fields', [])
 
     def parse_page(self, page: Page) -> List[Dict[str, Any]]:
         """
-        Parse a single list page and extract bid notices.
+        단일 목록 페이지를 파싱하여 입찰 공고 목록을 추출합니다.
 
         Args:
-            page: Playwright page object
+            page: Playwright 페이지 객체
 
         Returns:
-            List of bid notice dictionaries
+            입찰 공고 딕셔너리 리스트
         """
         notices = []
 
         try:
             # Wait for table to load
-            # NuriJangter uses WebSquare grid
+            # 테이블 로드 대기 (WebSquare 그리드 사용)
             table_selector = '#mf_wfm_container_grdBidPbancList_body_table, .w2grid_body_table'
             page.wait_for_selector(table_selector, timeout=10000)
 
             # Extract table rows
+            # 테이블 행 추출
             rows = page.locator('tr.grid_body_row').all()
 
-            logger.info(f"Found {len(rows)} rows on page")
+            logger.info(f"페이지에서 {len(rows)}개의 행을 발견했습니다")
 
             for idx, row in enumerate(rows):
                 try:
@@ -59,22 +60,23 @@ class ListPageParser:
                     if notice:
                         notices.append(notice)
                 except Exception as e:
-                    logger.warning(f"Failed to parse row {idx}: {e}")
+                    logger.warning(f"행 {idx} 파싱 실패: {e}")
                     continue
 
         except Exception as e:
-            logger.error(f"Failed to parse list page: {e}")
+            logger.error(f"목록 페이지 파싱 실패: {e}")
 
         return notices
 
     def _parse_row(self, row, page: Page) -> Optional[Dict[str, Any]]:
         """
-        Parse a single table row.
+        단일 테이블 행을 파싱합니다.
         """
         try:
             notice = {}
 
             # NuriJangter uses WebSquare grid with col_id attributes
+            # 누리장터는 col_id 속성을 가진 WebSquare 그리드를 사용합니다
             
             # Notice number (공고번호)
             number_elem = row.locator('td[col_id="bidPbancNum"]').first
@@ -86,6 +88,7 @@ class ListPageParser:
             if name_cell.count() > 0:
                 notice['bid_notice_name'] = self._clean_text(name_cell.inner_text())
                 # For Click-based navigation, we don't extract URL but we can mark it
+                # 클릭 기반 네비게이션을 위해 URL을 추출하지 않지만, 상세 페이지가 있음을 표시합니다
                 notice['has_detail'] = True
                 
             # Agency (공고기관)
@@ -94,7 +97,7 @@ class ListPageParser:
                 notice['announcement_agency'] = self._clean_text(agency_elem.inner_text())
 
             # Bid method - Not directly visible in standard columns but might be there
-            # Skipping for now or mapping if column exists
+            # 입찰 방법 - 표준 컬럼에는 직접 보이지 않지만 존재할 수 있음 (지금은 생략)
 
             # Announcement date (공고일시)
             date_elem = row.locator('td[col_id="pbancPstgDt"]').first
@@ -107,6 +110,7 @@ class ListPageParser:
                 notice['deadline_date'] = self._clean_text(deadline_elem.inner_text())
 
             # Valid check
+            # 유효성 검사
             if not notice.get('bid_notice_number'):
                 return None
 
@@ -125,10 +129,10 @@ class ListPageParser:
         return url  # Not used for SPA click navigation
 
     def has_next_page(self, page: Page) -> bool:
-        """Check if there is a next page."""
+        """다음 페이지가 있는지 확인합니다."""
         try:
             # 1. Check for "Next" (arrow) button
-            # WebSquare pagination next button
+            # '다음' (화살표) 버튼 확인 (WebSquare 페이지네이션)
             next_button = page.locator('#mf_wfm_container_pagelist_next_btn a, .w2pageList_next_btn').first
             
             if next_button.count() > 0:
@@ -136,7 +140,8 @@ class ListPageParser:
                     return True
 
             # 2. Check for the next numbered page
-            # Identify current page number
+            # 다음 숫자 페이지 확인
+            # Identify current page number (현재 페이지 번호 식별)
             current_page_elem = page.locator('.w2pageList_col_selected, .w2pageList_label_selected').first
             current_page_num = 1
             if current_page_elem.count() > 0:
@@ -148,10 +153,12 @@ class ListPageParser:
             next_page_num = current_page_num + 1
             
             # Check if button for next page number exists
+            # 다음 페이지 번호 버튼이 존재하는지 확인
             # ID pattern: mf_wfm_container_pagelist_page_{number}
             next_page_id = f"mf_wfm_container_pagelist_page_{next_page_num}"
             
             # Use JS to check existence
+            # JS를 사용하여 존재 여부 확인
             js_script = f"""
                 (function() {{
                     var btn = document.getElementById('{next_page_id}');
@@ -164,25 +171,22 @@ class ListPageParser:
                 
             return False
         except Exception as e:
-            logger.debug(f"Error checking for next page: {e}")
+            logger.debug(f"다음 페이지 확인 중 에러: {e}")
             return False
 
     def go_to_next_page(self, page: Page) -> bool:
         """
-        Navigate to the next page.
-        Strategies:
-        1. Find current active page.
-        2. Look for 'current_page + 1' link.
-        3. If not found, look for 'Next Group' button.
+        다음 페이지로 이동합니다.
+        전략:
+        1. 현재 활성 페이지 식별.
+        2. '현재 페이지 + 1' 링크 찾기.
+        3. 없으면 '다음 그룹(>)' 버튼 찾기.
         """
         try:
             # 1. Identify current page
-            # WebSquare active page usually has a class like 'w2pageList_col_selected' or similar style
-            # Based on inspection, we can look for the text of the selected item or assume based on state
-            # For robustness, we try to find the button connected to the "next number"
-            
-            # Simple heuristic: Try to find numbers 1 to 11. 
-            # If 1 is selected, click 2. If 10 is selected, click next group.
+            # 현재 페이지 식별
+            # WebSquare 활성 페이지는 보통 'w2pageList_col_selected' 같은 클래스를 가짐
+            # 1이 선택되어 있으면 2를 클릭. 10이 선택되어 있으면 다음 그룹을 클릭.
             
             current_page_elem = page.locator('.w2pageList_col_selected, .w2pageList_label_selected').first
             current_page_num = 1
@@ -193,18 +197,21 @@ class ListPageParser:
                     pass
 
             next_page_num = current_page_num + 1
-            logger.info(f"Attempting to navigate from page {current_page_num} to {next_page_num}")
+            logger.info(f"페이지 {current_page_num}에서 {next_page_num}로 이동 시도")
             
             # Scroll to bottom to ensure pagination is in view/active
+            # 페이지네이션이 보이도록 하단으로 스크롤
             page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             time.sleep(0.5)
             
             # 2. Try to find the next numeric page button
+            # 다음 숫자 페이지 버튼 찾기 시도
             # ID pattern: mf_wfm_container_pagelist_page_{number}
             next_page_id = f"mf_wfm_container_pagelist_page_{next_page_num}"
             
             # Use JS to check existence and click directly
             # This is more robust for WebSquare than Playwright's simulated click
+            # JS로 확인하고 직접 클릭 (WebSquare에서 더 안정적)
             js_script = f"""
                 (function() {{
                     var btn = document.getElementById('{next_page_id}');
@@ -217,23 +224,25 @@ class ListPageParser:
             """
             
             if page.evaluate(js_script):
-                logger.info(f"Clicked numeric page {next_page_num} via JS")
+                logger.info(f"JS를 통해 숫자 페이지 {next_page_num} 클릭됨")
                 page.wait_for_load_state('networkidle', timeout=10000)
                 time.sleep(2)
                 return True
 
             # 3. If next numeric button not found, try "Next Group" button (>)
+            # 다음 숫자 버튼이 없으면 '다음 그룹' 버튼 시도
             # Selector: #mf_wfm_container_pagelist_next_btn
-            # Also try generic "next" class
             js_next_group = """
                 (function() {
-                    // Try ID first
+                    # Try ID first
+                    # ID 우선 시도
                     var btn = document.querySelector('#mf_wfm_container_pagelist_next_btn');
                     if (btn) {
                         btn.click();
                         return true;
                     }
-                    // Try by class/aria for robustness
+                    # Try by class/aria for robustness
+                    # 클래스/aria로 시도
                     var nextBtn = document.querySelector('.w2pageList_next_btn, .w2pageList_btn_next');
                     if (nextBtn) {
                         nextBtn.click();
@@ -244,12 +253,12 @@ class ListPageParser:
             """
             
             if page.evaluate(js_next_group):
-                logger.info("Clicked next group button via JS")
+                logger.info("JS를 통해 다음 그룹 버튼 클릭됨")
                 page.wait_for_load_state('networkidle', timeout=10000)
                 time.sleep(2)
                 return True
             
-            logger.info("No next page or group button found")
+            logger.info("다음 페이지 또는 그룹 버튼을 찾을 수 없음")
             return False
 
         except Exception as e:

@@ -1,7 +1,7 @@
 """
-Improved Detail page parser for NuriJangter bid notices.
+누리장터 입찰 공고 상세 페이지 파서 개선판 (Improved Detail Page Parser)
 
-This version uses more robust strategies for extracting data from WebSquare-based pages.
+WebSquare 기반 페이지에서 데이터를 추출하기 위한 강력한 전략들을 포함하고 있습니다.
 """
 
 from typing import Dict, List, Any, Optional
@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 class DetailPageParser:
     """
-    Improved parser with multiple extraction strategies for NuriJangter detail pages.
+    누리장터 상세 페이지를 위한 다중 추출 전략 파서.
 
-    Strategies:
-    1. XPath-based TH-TD following-sibling
-    2. Table row scanning with flexible matching
-    3. Label-value pair extraction with fuzzy matching
-    4. Frame-aware parsing
+    전략(Strategies):
+    1. XPath 기반 TH-TD 형제 요소 찾기 (XPath-based TH-TD following-sibling)
+    2. 테이블 행 순회 및 유연한 매칭 (Table row scanning)
+    3. 라벨-값 클래스 매칭 및 퍼지 매칭 (Label-value pair extraction)
+    4. 프레임 인식 파싱 (Frame-aware parsing)
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -32,20 +32,21 @@ class DetailPageParser:
 
     def parse_page(self, page: Page, base_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Parse a detail page with improved extraction logic.
+        개선된 추출 로직으로 상세 페이지를 파싱합니다.
 
         Args:
-            page: Playwright page object (could be new tab from list page)
-            base_data: Base data from list page
+            page: Playwright 페이지 객체 (또는 새 탭)
+            base_data: 목록 페이지에서 가져온 기본 데이터
 
         Returns:
-            Complete bid notice data dictionary
+            완전한 입찰 공고 데이터 딕셔너리
         """
         notice = base_data.copy()
 
         try:
             # Wait for specific detail content (Modal or Tab) to ensure we don't just see the background list page
-            # Based on browser analysis: .w2window_content_body (Modal), .w2tabcontrol_contents_wrapper_selected (Tab), or specific ID
+            # 특정 상세 컨텐츠(모달 또는 탭)가 로드될 때까지 대기하여 백그라운드 목록 페이지를 파싱하는 것을 방지합니다.
+            # .w2window_content_body (모달), .w2tabcontrol_contents_wrapper_selected (탭) 등
             try:
                 page.wait_for_selector(
                     '.w2window_content_body, .w2tabcontrol_contents_wrapper_selected, div[id*="contents_content1_body"]', 
@@ -53,23 +54,25 @@ class DetailPageParser:
                     state='visible'
                 )
             except:
-                logger.warning("Timeout waiting for specific detail container, falling back to any table")
+                logger.warning("상세 컨텐츠 대기 시간 초과, 일반 테이블 대기로 대체합니다")
                 try:
                     page.wait_for_selector('table', timeout=5000)
                 except:
                     pass
 
             # Find the best context to parse (ElementHandle or Frame)
+            # 파싱할 최적의 컨텍스트 찾기 (ElementHandle 또는 Frame)
             target_context = self._find_detail_context(page)
 
-            logger.info(f"Parsing detail page using context type: {type(target_context).__name__}")
+            logger.info(f"파싱 컨텍스트 타입: {type(target_context).__name__}")
 
             # Extract all table data first
+            # 모든 테이블 데이터 우선 추출
             all_data = self._extract_all_table_data(target_context)
             
             # ----------------------------------------
 
-            logger.debug(f"Extracted {len(all_data)} key-value pairs from tables")
+            logger.debug(f"테이블에서 {len(all_data)}개의 키-값 쌍을 추출했습니다")
 
             # Map extracted data to our schema
             notice.update(self._map_to_schema(all_data))
@@ -89,46 +92,50 @@ class DetailPageParser:
 
     def _find_detail_context(self, page: Page):
         """
-        Find the best context for extraction.
-        Prioritizes specific detail containers (modals/tabs) to avoid parsing background list page.
-        Failover to best frame or page.
+        추출을 위한 최적의 컨텍스트를 찾습니다.
+        백그라운드 목록 페이지 파싱을 피하기 위해 특정 상세 컨테이너(모달/탭)를 우선시합니다.
+        실패 시 최적의 프레임 또는 페이지로 폴백합니다.
         """
         # Strategy 1: Look for Modal Content Body (Standard WebSquare Modal)
+        # 전략 1: 모달 컨텐츠 바디 찾기 (표준 WebSquare 모달)
         try:
             modal_content = page.query_selector('.w2window_content_body')
             if modal_content and modal_content.is_visible():
-                logger.debug("Found modal content body (.w2window_content_body)")
+                logger.debug("모달 컨텐츠 발견 (.w2window_content_body)")
                 return modal_content
         except:
             pass
 
         # Strategy 2: Look for Active Tab Content (Specific to Tabbed Details)
+        # 전략 2: 활성 탭 컨텐츠 찾기 (탭 방식 상세 페이지용)
         try:
             tab_content = page.query_selector('.w2tabcontrol_contents_wrapper_selected')
             if tab_content and tab_content.is_visible():
-                logger.debug("Found active tab content (.w2tabcontrol_contents_wrapper_selected)")
+                logger.debug("활성 탭 컨텐츠 발견 (.w2tabcontrol_contents_wrapper_selected)")
                 return tab_content
         except:
             pass
             
         # Strategy 3: Specific ID for some layouts (as found in investigation)
+        # 전략 3: 특정 레이아웃 ID 찾기
         try:
             specific_container = page.query_selector('div[id*="contents_content1_body"]')
             if specific_container and specific_container.is_visible():
-                logger.debug("Found specific content container (content1_body)")
+                logger.debug("특정 컨텐츠 컨테이너 발견 (content1_body)")
                 return specific_container
         except:
             pass
 
         # Strategy 4: Fallback to Best Frame (Original Logic)
+        # 전략 4: 최적 프레임으로 폴백
         return self._find_best_frame(page)
 
     def _find_best_frame(self, page: Page):
         """
-        Find the frame with the most content (likely the main content frame).
+        가장 많은 컨텐츠(메인 컨텐츠일 가능성이 높음)를 가진 프레임을 찾습니다.
 
         Returns:
-            Page or Frame object
+            Page 또는 Frame 객체
         """
         frames = page.frames
 
@@ -136,6 +143,7 @@ class DetailPageParser:
             return page
 
         # Score each frame by table count
+        # 테이블 개수로 각 프레임 점수 매기기
         best_frame = page
         max_score = len(page.query_selector_all('table'))
 
@@ -145,7 +153,7 @@ class DetailPageParser:
                 if table_count > max_score:
                     max_score = table_count
                     best_frame = frame
-                    logger.debug(f"Selected frame '{frame.name or 'unnamed'}' with {table_count} tables")
+                    logger.debug(f"프레임 선택됨 '{frame.name or 'unnamed'}' (테이블 {table_count}개)")
             except:
                 continue
 
@@ -153,21 +161,22 @@ class DetailPageParser:
 
     def _extract_all_table_data(self, frame) -> Dict[str, str]:
         """
-        Extract all key-value pairs from all tables using multiple strategies.
+        다중 전략을 사용하여 모든 테이블에서 키-값 쌍을 추출합니다.
 
         Returns:
-            Dictionary of label -> value pairs
+            라벨 -> 값 딕셔너리
         """
         data = {}
 
         # Strategy 1: XPath - TH with following TD
+        # 전략 1: XPath - TH 다음에 오는 TD 찾기
         try:
             # Find all TH elements
             ths = frame.query_selector_all('th')
             for th in ths:
                 try:
                     # CHECK: Is this TH inside the Search Filter?
-                    # The Search Filter causes "garbage" data (e.g. date picker ranges)
+                    # 체크: 이 TH가 검색 필터 안에 있는지? (검색 필터는 잘못된 데이터를 유발함)
                     is_search_filter = th.evaluate("el => el.closest('#mf_wfm_container_shcBidPbanc, #mf_wfm_container_grpSrchBox, .sh_group, .search_box, .search_area, .tbl_search') !== null")
                     if is_search_filter:
                         continue
@@ -177,6 +186,7 @@ class DetailPageParser:
                         continue
 
                     # Try to find following TD using JS
+                    # JS를 사용하여 다음 TD 찾기
                     td_text = th.evaluate("""
                         (el) => {
                             const td = el.nextElementSibling;
@@ -191,18 +201,20 @@ class DetailPageParser:
                         value = self._clean_text(td_text)
                         if value:
                             # Ignore garbage values (too long)
+                            # 너무 긴 값(쓰레기 데이터) 무시
                             if len(value) > 100:
-                                logger.debug(f"[XPath] Skipped long value for {label}: {len(value)} chars")
+                                logger.debug(f"[XPath] 긴 값 건너뜀 {label}: {len(value)}자")
                             else:
                                 data[label] = value
                                 logger.debug(f"[XPath] {label} = {value[:50]}")
                 except Exception as e:
-                    logger.debug(f"Failed to extract from TH: {e}")
+                    logger.debug(f"TH에서 추출 실패: {e}")
                     continue
         except Exception as e:
-            logger.debug(f"Strategy 1 failed: {e}")
+            logger.debug(f"전략 1 실패: {e}")
 
         # Strategy 2: Table row iteration
+        # 전략 2: 테이블 행 순회
         try:
             tables = frame.query_selector_all('table')
             for table in tables:
@@ -238,24 +250,26 @@ class DetailPageParser:
                                 class1 = cell1.evaluate("el => el.className")
 
                                 # TH followed by TD (or TD.w2tb_th followed by TD)
+                                # TH 다음에 TD가 오는지 확인 (또는 class에 w2tb_th가 있는 TD)
                                 is_header = (tag1 == "TH") or (tag1 == "TD" and "w2tb_th" in class1)
                                 
                                 # DEBUG LOGGING
                                 raw_text = self._clean_text(cell1.inner_text())
                                 if "개찰일시" in raw_text:
-                                    logger.info(f"DEBUG STRATEGY 2: Found '개찰일시' candidate. Tag1={tag1}, Class1='{class1}', IsHeader={is_header}, Tag2={tag2}")
+                                    logger.info(f"디버그 전략 2: '개찰일시' 후보 발견. Tag1={tag1}, Class1='{class1}', IsHeader={is_header}, Tag2={tag2}")
 
                                 if is_header and tag2 == "TD":
                                     label = raw_text
                                     value = self._clean_text(cell2.inner_text())
                                     
                                     if "개찰일시" in label:
-                                         logger.info(f"DEBUG STRATEGY 2: Extracted '개찰일시' = '{value}'")
+                                         logger.info(f"디버그 전략 2: '개찰일시' 추출됨 = '{value}'")
 
                                     if label and value:
                                         # Ignore garbage values (too long)
+                                        # 긴 값(쓰레기 데이터) 무시
                                         if len(value) > 100:
-                                             logger.debug(f"[Table] Skipped long value for {label}: {len(value)} chars")
+                                             logger.debug(f"[Table] 긴 값 건너뜀 {label}: {len(value)}자")
                                         elif label not in data:  # Don't overwrite
                                             data[label] = value
                                             logger.debug(f"[Table] {label} = {value[:50]}")
@@ -264,12 +278,13 @@ class DetailPageParser:
                                 else:
                                     i += 1
                     except Exception as e:
-                        logger.info(f"Failed to parse row: {e}")
+                        logger.info(f"행 파싱 실패: {e}")
                         continue
         except Exception as e:
-            logger.debug(f"Strategy 2 failed: {e}")
+            logger.debug(f"전략 2 실패: {e}")
 
         # Strategy 3: Label-value divs/spans (less common in tables but worth trying)
+        # 전략 3: Label-Value div/span (테이블이 아닌 div 구조)
         try:
             # Look for .label or .th class followed by .value or .td class
             # Include 'label' tag
@@ -336,9 +351,9 @@ class DetailPageParser:
 
     def _map_to_schema(self, raw_data: Dict[str, str]) -> Dict[str, Any]:
         """
-        Map extracted raw data to our BidNotice schema fields.
+        추출된 원시 데이터를 BidNotice 스키마 필드에 매핑합니다.
 
-        Uses fuzzy matching to handle variations in Korean labels.
+        한국어 라벨의 다양한 변형을 처리하기 위해 퍼지 매칭(Fuzzy Matching)을 사용합니다.
         """
         mapped = {}
 
@@ -406,14 +421,14 @@ class DetailPageParser:
 
     def _validate_field_value(self, field_name: str, value: str) -> bool:
         """
-        Validate that the extracted value makes sense for the given field.
+        추출된 값이 해당 필드에 적절한지 검증합니다.
 
         Args:
-            field_name: Schema field name
-            value: Extracted value
+            field_name: 스키마 필드명
+            value: 추출된 값
 
         Returns:
-            True if value is valid for this field, False otherwise
+            유효하면 True, 아니면 False
         """
         if value is None:
             return True
@@ -459,12 +474,12 @@ class DetailPageParser:
 
     def _find_value_by_labels(self, data: Dict[str, str], labels: List[str], blacklist: List[str] = None) -> Optional[str]:
         """
-        Find a value in data dict by trying multiple label variations.
+        여러 라벨 변형을 시도하여 데이터에서 값을 찾습니다.
 
-        Uses fuzzy matching to handle:
-        - Extra spaces
-        - Trailing colons
-        - Parentheses with units
+        다음과 같은 경우를 처리하기 위해 퍼지 매칭을 사용합니다:
+        - 불필요한 공백
+        - 끝부분의 콜론(:)
+        - 괄호가 포함된 단위
         """
         for label in labels:
             # Exact match
@@ -488,9 +503,9 @@ class DetailPageParser:
 
     def _parse_attached_files(self, frame) -> List[AttachedFile]:
         """
-        Extract attached files from detail page.
+        상세 페이지에서 첨부파일을 추출합니다.
 
-        NuriJangter typically uses grid with id containing 'grdFile' or similar.
+        누리장터는 보통 'grdFile' 등이 포함된 ID의 그리드를 사용합니다.
         """
         files = []
 
@@ -567,12 +582,12 @@ class DetailPageParser:
 
     def _clean_text(self, text: str) -> str:
         """
-        Clean extracted text.
+        추출된 텍스트를 정제합니다.
 
-        Handles:
-        - Extra whitespace
-        - Newlines
-        - Common label suffixes
+        처리 내용:
+        - 여분의 공백 제거
+        - 개행 문자 제거
+        - 일반적인 라벨 접미사 제거
         """
         if not text:
             return ""
