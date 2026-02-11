@@ -71,14 +71,14 @@ def parse_arguments():
     parser.add_argument(
         '--resume',
         action='store_true',
-        default=True,
-        help='마지막 체크포인트에서 재개 (기본값: True)'
+        default=False,
+        help='마지막 체크포인트에서 재개 (기본값: False)'
     )
 
     parser.add_argument(
         '--no-resume',
         action='store_true',
-        help='처음부터 다시 시작, 체크포인트 무시'
+        help='(deprecated) 처음부터 다시 시작 (이제 기본값이므로 불필요)'
     )
 
     parser.add_argument(
@@ -181,11 +181,7 @@ def run_crawler(config: dict, resume: bool = True):
             checkpoint_file=checkpoint_config.get('filename', 'crawler_checkpoint.json')
         )
         if cm.load_checkpoint():
-            if cm.state == CrawlState.COMPLETED:
-                logger.info("이전 크롤링이 완료(COMPLETED) 상태입니다. 새로운 데이터를 수집하기 위해 처음부터 시작합니다 (Smart Resume).")
-                resume = False
-            else:
-                logger.info(f"이전 크롤링 상태: {cm.state.value}. 재개합니다...")
+            logger.info(f"이전 크롤링 상태: {cm.state.value}. 체크포인트에서 재개합니다 (Page {cm.current_page})")
         else:
             logger.info("유효한 체크포인트가 없습니다. 처음부터 시작합니다.")
 
@@ -333,7 +329,7 @@ def main():
 
     # Determine resume mode
     # 재개 모드 결정
-    resume = not args.no_resume
+    resume = args.resume
 
     # Run crawler
     # 크롤러 실행
